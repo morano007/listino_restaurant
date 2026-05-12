@@ -3,11 +3,39 @@ import pandas as pd
 from datetime import datetime
 import os
 from PIL import Image
+import io
 
 st.set_page_config(page_title="Listino Prezzi", layout="wide")
-st.title("📋 Listino Prezzi - Ristorante")
 
-# ====================== CREA CARTELLA IMMAGINI ======================
+# ====================== PASSWORD ======================
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+PASSWORD = "2026"   # ← CAMBIA QUESTA CON LA TUA PASSWORD
+
+def check_login():
+    if not st.session_state.logged_in:
+        st.title("🔐 Accesso Listino Prezzi")
+        pw = st.text_input("Inserisci Password", type="password")
+        if st.button("Accedi"):
+            if pw == PASSWORD:
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("❌ Password errata")
+        st.stop()
+
+check_login()
+
+# ====================== CONFIG RISTORANTE ======================
+if 'ristorante' not in st.session_state:
+    st.session_state.ristorante = {
+        "nome": "IL TUO RISTORANTE",
+        "indirizzo": "Indirizzo completo, Thailandia",
+        "telefono": "Tel: +66 XX XXX XXX",
+    }
+
+# ====================== CARTELLA IMMAGINI ======================
 if not os.path.exists("images"):
     os.makedirs("images")
 
@@ -21,19 +49,39 @@ if 'df' not in st.session_state:
 df = st.session_state.df
 
 # ====================== SIDEBAR ======================
-st.sidebar.header("Azioni")
+st.sidebar.success("✅ Accesso Effettuato")
 if st.sidebar.button("💾 Salva Listino"):
     df.to_csv('listino.csv', index=False)
-    st.success("✅ Listino salvato!")
+    st.success("✅ Listino salvato correttamente!")
 
-st.sidebar.info("Valuta: Thai Baht (฿)")
+if st.sidebar.button("🔓 Logout"):
+    st.session_state.logged_in = False
+    st.rerun()
+
+# ====================== INTESTAZIONE ======================
+col1, col2 = st.columns([1, 4])
+with col1:
+    logo_file = st.file_uploader("📸 Carica Logo", type=["png", "jpg", "jpeg"], key="logo_uploader")
+    if logo_file:
+        logo_path = "images/logo.jpg"
+        with open(logo_path, "wb") as f:
+            f.write(logo_file.getbuffer())
+        st.image(logo_file, width=130)
+
+with col2:
+    st.title(st.session_state.ristorante["nome"])
+    st.subheader(st.session_state.ristorante["indirizzo"])
+    st.subheader(st.session_state.ristorante["telefono"])
+    st.caption(f"📅 Listino Prezzi aggiornato al {datetime.now().strftime('%d %B %Y')}")
+
+st.divider()
 
 # ====================== TABS ======================
-tab1, tab2, tab3, tab4 = st.tabs(["📝 Modifica Listino", "➕ Aggiungi Prodotto", "🏷️ Categorie", "👀 Anteprima Listino"])
+tab1, tab2, tab3, tab4 = st.tabs(["📝 Modifica Listino", "➕ Aggiungi Prodotto", "🏷️ Categorie", "📄 Esporta PDF"])
 
-# ------------------- TAB 1: Modifica -------------------
+# TAB 1 - Modifica
 with tab1:
-    st.subheader("Modifica Listino Prezzi")
+    st.subheader("Modifica Listino")
     if not df.empty:
         edited_df = st.data_editor(
             df,
@@ -42,43 +90,39 @@ with tab1:
             column_config={
                 "prezzo": st.column_config.NumberColumn("Prezzo ฿", format="%.0f"),
                 "id": st.column_config.NumberColumn(disabled=True),
-                "foto": st.column_config.TextColumn("Nome Foto", disabled=True)
+                "foto": st.column_config.TextColumn(disabled=True)
             }
         )
         if not edited_df.equals(df):
             st.session_state.df = edited_df
     else:
-        st.info("Nessun prodotto. Aggiungine nella scheda dedicata.")
+        st.info("Nessun prodotto presente.")
 
-# ------------------- TAB 2: Aggiungi Prodotto -------------------
+# TAB 2 - Aggiungi
 with tab2:
     with st.form("new_product"):
         st.subheader("➕ Nuovo Prodotto")
-        
         col1, col2 = st.columns(2)
         with col1:
-            categorie_esistenti = sorted(df['categoria'].unique().tolist()) if not df.empty else []
-            categoria = st.selectbox("Categoria", categorie_esistenti + ["➕ Nuova Categoria"])
-            
+            categorie = sorted(df['categoria'].unique().tolist()) if not df.empty else []
+            categoria = st.selectbox("Categoria", categorie + ["➕ Nuova Categoria"])
             if categoria == "➕ Nuova Categoria":
-                categoria = st.text_input("Nome nuova categoria")
-            
-            nome = st.text_input("Nome prodotto")
+                categoria = st.text_input("Nome Nuova Categoria")
+            nome = st.text_input("Nome Prodotto")
 
         with col2:
-            prezzo = st.number_input("Prezzo (฿)", min_value=0, step=10, format="%d")
-            foto = st.file_uploader("Foto prodotto (opzionale)", type=["jpg", "jpeg", "png"])
+            prezzo = st.number_input("Prezzo (฿)", min_value=0, step=10, value=100)
+            foto = st.file_uploader("Foto Prodotto", type=["jpg", "jpeg", "png"])
 
         descrizione = st.text_area("Descrizione")
         allergeni = st.text_input("Allergeni (opzionale)")
 
         if st.form_submit_button("Aggiungi al Listino"):
             if nome and categoria:
-                # Salva foto se caricata
-                foto_filename = ""
+                foto_name = ""
                 if foto:
-                    foto_filename = f"{nome.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.jpg"
-                    with open(os.path.join("images", foto_filename), "wb") as f:
+                    foto_name = f"{nome.replace(' ', '_')}.jpg"
+                    with open(os.path.join("images", foto_name), "wb") as f:
                         f.write(foto.getbuffer())
 
                 new_id = len(df) + 1 if not df.empty else 1
@@ -88,65 +132,71 @@ with tab2:
                     'nome': nome,
                     'descrizione': descrizione,
                     'prezzo': prezzo,
-                    'foto': foto_filename,
+                    'foto': foto_name,
                     'allergeni': allergeni
                 }])
-                
                 st.session_state.df = pd.concat([df, new_row], ignore_index=True)
                 st.success(f"✅ {nome} aggiunto!")
                 st.rerun()
-            else:
-                st.error("Nome e Categoria sono obbligatori")
 
-# ------------------- TAB 3: Categorie -------------------
+# TAB 3 - Categorie
 with tab3:
-    st.subheader("Gestione Categorie")
+    st.subheader("Categorie Attuali")
     if not df.empty:
-        st.write("**Categorie attuali:**")
         for cat in sorted(df['categoria'].unique()):
             st.write(f"• {cat}")
     else:
-        st.info("Aggiungi prodotti per vedere le categorie")
+        st.info("Nessuna categoria")
 
-# ------------------- TAB 4: Anteprima Listino -------------------
+# TAB 4 - PDF
 with tab4:
-    st.subheader("👀 Anteprima Listino Prezzi")
-    if not df.empty:
-        df_sorted = df.sort_values(by=['categoria', 'nome'])
-        
-        for categoria in sorted(df['categoria'].unique()):
-            st.markdown(f"### {categoria}")
-            prodotti = df_sorted[df_sorted['categoria'] == categoria]
-            
-            for _, p in prodotti.iterrows():
-                cols = st.columns([1, 4, 2])
-                
-                # Foto
-                with cols[0]:
-                    if p['foto'] and os.path.exists(os.path.join("images", p['foto'])):
-                        try:
-                            image = Image.open(os.path.join("images", p['foto']))
-                            st.image(image, width=80)
-                        except:
-                            st.write("📸")
-                    else:
-                        st.write("📸")
-                
-                # Nome + Descrizione
-                with cols[1]:
-                    st.write(f"**{p['nome']}**")
-                    if p['descrizione']:
-                        st.caption(p['descrizione'])
-                
-                # Prezzo
-                with cols[2]:
-                    st.write(f"**฿ {p['prezzo']:,.0f}**")
-                
-                st.divider()
-    else:
-        st.info("Listino vuoto")
+    st.subheader("📄 Esporta Listino PDF")
+    if st.button("🚀 Genera PDF Listino", type="primary", use_container_width=True):
+        if df.empty:
+            st.error("Listino vuoto!")
+        else:
+            # Generazione PDF semplice tramite HTML
+            html = f"""
+            <h1 style="text-align:center">{st.session_state.ristorante['nome']}</h1>
+            <p style="text-align:center">{st.session_state.ristorante['indirizzo']}<br>
+            {st.session_state.ristorante['telefono']}<br>
+            Aggiornato: {datetime.now().strftime('%d/%m/%Y')}</p>
+            <hr>
+            """
+            for cat in sorted(df['categoria'].unique()):
+                html += f"<h2>{cat}</h2><table style='width:100%'>"
+                for _, row in df[df['categoria'] == cat].iterrows():
+                    html += f"""
+                    <tr>
+                        <td><b>{row['nome']}</b><br>{row['descrizione']}</td>
+                        <td style="text-align:right"><b>฿ {row['prezzo']:,.0f}</b></td>
+                    </tr>
+                    """
+                html += "</table><br>"
 
-# Tabella completa
+            st.download_button(
+                label="📥 Scarica PDF",
+                data=html,
+                file_name=f"Listino_{datetime.now().strftime('%Y%m%d')}.html",
+                mime="text/html"
+            )
+            st.info("Apri il file HTML e stampa in PDF (Cmd + P → Salva come PDF)")
+
+# Anteprima
 st.divider()
-st.subheader("Tabella Completa")
-st.dataframe(df.sort_values(by=['categoria', 'nome']), use_container_width=True)
+st.subheader("Anteprima Listino")
+if not df.empty:
+    for categoria in sorted(df['categoria'].unique()):
+        st.markdown(f"### {categoria}")
+        for _, p in df[df['categoria'] == categoria].iterrows():
+            cols = st.columns([1, 4, 2])
+            with cols[0]:
+                if p['foto'] and os.path.exists(os.path.join("images", p['foto'])):
+                    st.image(os.path.join("images", p['foto']), width=80)
+            with cols[1]:
+                st.write(f"**{p['nome']}**")
+                if p['descrizione']:
+                    st.caption(p['descrizione'])
+            with cols[2]:
+                st.write(f"**฿ {p['prezzo']:,.0f}**")
+            st.divider()
